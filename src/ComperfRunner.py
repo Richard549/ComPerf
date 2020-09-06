@@ -4,9 +4,10 @@ from argparse import ArgumentParser, ArgumentTypeError
 
 from ComperfUtil import initialise_logging, LogLevelOption, ensure_exists
 from ComperfDataset import ComperfDataset, Target
-from ComperfModelling import ComperfModeller, get_experiment_indexes_fixed_partitioning, Regularisation
-from ComperfHyperoptWrapper import find_best_hyperparams
-from ComperfAnalysis import run_sample_weighting_and_pca_transformation,
+from ComperfModelling import ComperfModeller, get_experiment_indexes_fixed_partitioning, Regularisation, convert_regularisation_str_to_enum, run_linear_regression
+from ComperfOptWrapper import find_best_hyperparams
+from ComperfAnalysis import run_sample_weighting_and_pca_transformation, calculate_mae, performance_comparison
+import ComperfResults
 
 def run_comperf(
 		experiment_folder,
@@ -66,6 +67,7 @@ def run_comperf(
 			pca_transformation=Config.pca_transformation,
 			input_events=model_input_events,
 			response_event=Config.response_event,
+			regularisation=regularisation,
 			symbols=Config.symbols,
 			should_sum=Config.should_sum,
 			exclusive_cache_events=Config.exclusive_cache_events,
@@ -184,11 +186,13 @@ def run_comperf(
 		validation_set=validation_taskset,
 		testing_set=testing_taskset)
 
-	if len(models) < num_repeat_models_per_k_fold:
+	num_already_trained = len(models)
 
-		num_required_models = num_repeat_models_per_k_fold - len(models)
+	if num_already_trained < num_repeat_models_per_k_fold:
 
-		models = modeller.train_models(
+		num_required_models = num_repeat_models_per_k_fold - num_already_trained
+
+		new_models = modeller.train_models(
 			training_set=training_taskset,
 			validation_set=validation_taskset,
 			testing_set=testing_taskset,
@@ -197,13 +201,127 @@ def run_comperf(
 			training_sample_weights=training_sample_weights,
 			validation_sample_weights=validation_sample_weights)
 
+		models.extend(new_models)
+
+	logging.info("Finished loading %d models and training %d models!", num_already_trained, len(models) - num_already_trained)
+
 	# Now run linear regressions
+	# des meaning "destandardised"
+	lin_mae, lin_mse, lin_rmse, lin_coeff_fs_des = run_linear_regression(
+		training_taskset,
+		testing_taskset,
+		pca_matrix,
+		training_event_stats)
 
 	# Then collect the accuracy results for both the linear regressions and the neural networks
+	ann_rmses = []
+	for model in models:
+		mse = model.errors[str(sorted(testing_indexes))]
+		rmse = math.sqrt(mse)
+		ann_rmses.append(rmse)
+
+	ann_rmse = np.mean(ann_rmses)
+
+	lin_rmse_des = lin_rmse * training_event_stats[-1][1]
+	ann_rmse_des = ann_rmse * training_event_stats[-1][1]
+
+	lin_mae_des = lin_mae * training_event_stats[-1][1]
+	ann_mae_des = calculate_mae(models, testing_taskset) * training_event_stats[-1][1]
 
 	# Then write the accuracy results, linear coefficients, and (all) event stats to file
+	results_folder_full = experiment_folder + "/" + Config.results_folder
+
+	ComperfResults.write_event_stats_to_file(results_folder_full,
+		experiment_repeat_index,
+		k_fold_idx,
+		all_events,
+		all_event_stats)
+
+	ComperfResults.write_model_performance_to_file(results_folder_full,
+		experiment_repeat_index,
+		k_fold_idx,
+		ann_rmse_des,
+		lin_rmse_des,
+		ann_mae_des,
+		lin_mae_des)
+
+	ComperfResults.write_linreg_coefficients_to_file(results_folder_full,
+		experiment_repeat_index,
+		k_fold_idx,
+		model_input_events,
+		lin_coeff_fs_des)
 
 	# Then run the comparisons across configurations, using the neural networks (via DeepLIFT) and the linear regression coefficients
+
+	# Get the reference
+
+	params = {}
+	params["input_events"] = model_input_events
+	params["output_event"] = response_event
+	params["specific_symbols"] = Config.symbols
+	params["standardised"] = Config.should_standardise
+	params["summed"] = Config.should_sum
+	params["exclusive_cache_events"] = Config.exclusive_cache_events
+	params["constant_events"] = constant_events
+	params["is_training_set"] = False
+	params["training_event_stats"] = training_event_stats
+	params["set_indexes"] = testing_indexes
+
+	reference_configuration_idx = 0 # reference is the first configuration in the list
+	params["benchmark_id"] = reference_configuration_idx
+
+	reference_taskset, reference_taskset_fs, reference_taskset_all_events_fs_destandardised = get_configuration_tasksets(
+		dataset,
+		all_events,
+		training_pca_matrix,
+		params)
+
+	# Then for each target configuration, get the target taskset, apply the comparative analysis, then report it
+	for configuration_idx, configuration_identifier in enumerate(configurations):
+	
+		logging.info("Running comparative analysis between configuration %d and configuration %d of %d: %s", reference_configuration_idx, configuration_idx, len(configurations), str(configuration_identifier))
+
+		params["benchmark_id"] = configuration_idx
+		target_taskset, target_taskset_fs, target_taskset_all_events_fs_destandardised = get_configuration_tasksets(
+			dataset,
+			all_events,
+			training_pca_matrix,
+			params)
+
+		comparison_results = performance_comparison(
+			reference_taskset,
+			reference_taskset_fs,
+			reference_taskset_all_events_fs_destandardised,
+			target_taskset,
+			target_taskset_fs,
+			target_taskset_all_events_fs_destandardised,
+			models,
+			training_event_stats,
+			training_pca_matrix,
+			lin_coeff_fs_des)
+
+		average_contributions_per_event = comparison_results[0]
+		average_linreg_contributions_per_event = comparison_results[1]
+		average_coefficients_per_event = comparison_results[2]
+		average_input_event_value_variations_per_event = comparison_results[3]
+		average_all_event_value_variations_per_event = comparison_results[4]
+		average_pred_duration_variation = comparison_results[5]
+		average_true_duration_variation = comparison_results[6]
+
+		ComperfResults.write_performance_comparison_results_to_file(
+			results_folder_full,
+			experiment_repeat_index,
+			k_fold_idx,
+			configuration_identifier,
+			input_events,
+			all_events,
+			average_contributions_per_event,
+			average_linreg_contributions_per_event,
+			average_coefficients_per_event,
+			average_input_event_value_variations_per_event,
+			average_all_event_value_variations_per_event,
+			average_pred_duration_variation,
+			average_true_duration_variation)
 
 hyperparams = {}
 with open(hyperparameter_filename,'r') as f:
@@ -255,17 +373,6 @@ def parse_target(target_str):
 		logging.error("Do not recognise target: %s", target_str)
 		raise ValueError()
 
-def parse_regularisation(reg_str):
-	if reg_str == "l1":
-		return Regularisation.L1
-	elif reg_str == "l2":
-		return Regularisation.L2
-	elif reg_str == "l1l2":
-		return Regularisation.L1L2
-	else:
-		logging.error("Do not recognise regularisation: %s", reg_str)
-		raise ValueError()
-
 # Load the user-options and experiment base folder
 
 experiment_folder, logfile, log_level, tee_mode, should_reload, experiment_repeat_index, k_fold_idx = parse_args()
@@ -278,7 +385,7 @@ from Experiment import Config
 
 configurations = Config.get_configurations()
 target = parse_target(Config.target)
-regularisation = parse_regularisation(Config.regularisation)
+regularisation = convert_regularisation_str_to_enum(Config.regularisation)
 total_experiment_indexes = list(range(Config.num_profiles_per_experiment))
 num_repeat_models_per_k_fold = 1 # hardcoded
 
@@ -311,3 +418,5 @@ run_comperf(
 	experiment_repeat_index,
 	k_fold_idx,
 	num_repeat_models_per_k_fold)
+
+logging.info("Done")

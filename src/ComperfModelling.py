@@ -1,19 +1,18 @@
 import os, random, logging, json, math
 import numpy as np
-
 from enum import Enum, auto
 
 import tensorflow as tf
 import keras
 from keras import backend
 from keras.backend.tensorflow_backend import set_session
-
 from keras import metrics, regularizers, initializers
 from keras.layers import Input, Dense, BatchNormalization, Activation, Dropout, LeakyReLU
 from keras.models import Model, Sequential, load_model
 from keras.callbacks import ModelCheckpoint, CSVLogger, EarlyStopping
 from keras.constraints import NonNeg, Constraint
-
+from sklearn import datasets, linear_model
+from sklearn.metrics import mean_squared_error, r2_score
 import deeplift
 from deeplift.conversion import kerasapi_conversion as kc
 
@@ -23,6 +22,28 @@ class Regularisation(Enum):
 	L1 = auto()
 	L2 = auto()
 	L1L2 = auto()
+
+def convert_regularisation_str_to_enum(reg_str):
+	if reg_str == "l1":
+		return Regularisation.L1
+	elif reg_str == "l2":
+		return Regularisation.L2
+	elif reg_str == "l1l2":
+		return Regularisation.L1L2
+	else:
+		logging.error("Do not recognise regularisation: %s", reg_str)
+		raise ValueError()
+
+def convert_regularisation_enum_to_str(reg):
+	if reg == Regularisation.L1:
+		return "l1"
+	elif reg == Regularisation.L2:
+		return "l2"
+	elif reg == Regularisation.L1L2:
+		return "l1l2"
+	else:
+		logging.error("Do not recognise regularisation: %s", reg_str)
+		raise ValueError()
 
 """
 	This returns the experiment indexes (repeat indexes across all configurations) for the training/validation/testing splits
@@ -35,7 +56,10 @@ def get_experiment_indexes_fixed_partitioning(
 		experiment_modeling_size=100,
 		num_validation_indexes=20,
 		num_experiments=10,
-		folder):
+		folder=None):
+
+	if folder is None:
+		raise ValueError()
 
 	experiment_spec_file = folder + "/partitions.json"
 
@@ -565,3 +589,57 @@ class ComperfModeller:
 				activation='linear'))
 
 		return model
+
+def run_linear_regression(
+		training_taskset,
+		testing_taskset,
+		training_pca_matrix,
+		training_event_stats
+		):
+
+	# Construct, train, then predict on testing set
+	linear_regression = linear_model.LinearRegression()
+	linear_regression.fit(training_taskset[1], training_taskset[2])
+	linear_predictions = linear_regression.predict(testing_taskset[1])[:,0]
+	
+	# Get average testing errors
+	mae = np.sum(np.absolute(np.array(linear_predictions) - testing_taskset[2][:,0])) / float(len(testing_taskset[2]))
+	mse = mean_squared_error(testing_taskset[2][:,0], linear_predictions)
+	rmse = math.sqrt(mse)
+
+	linreg_coeff = linear_regression.coef_
+	linreg_coeff_fs = np.matmul(linreg_coeff, training_pca_matrix.components_)
+	linreg_coeff_fs_destandardised = ((linreg_coeff_fs * np.array(training_event_stats)[-1][1])) / np.array(training_event_stats).transpose()[1].transpose()[:-1][0]
+
+	return mae, mse, rmse, linreg_coeff_fs_destandardised
+
+def predict_from_model(model_file, examples):
+
+	backend.clear_session()
+	keras_model = load_model(model_file)
+	predictions = keras_model.predict(examples)[:,0]
+
+	return predictions
+
+def run_deeplift_comparison(
+		model_file,
+		target_example,
+		reference_example):
+			
+	backend.clear_session()
+
+	deeplift_model = kc.convert_model_from_saved_files(
+		model_file,
+		nonlinear_mxts_mode=deeplift.layers.NonlinearMxtsMode.RevealCancel)
+
+	deeplift_contribs_func = deeplift_model.get_target_contribs_func(
+		find_scores_layer_idx=0,
+		target_layer_idx=-1)
+
+	deeplift_results = np.array(deeplift_contribs_func(task_idx=0,
+		input_data_list=[[target]],
+		input_references_list=[reference_example],
+		batch_size=1,
+		progress_update=1))
+
+	return deeplift_results

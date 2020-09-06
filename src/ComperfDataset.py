@@ -44,16 +44,17 @@ class ComperfDataset:
 	def __init__(self,
 			input_events,
 			response_event,
-			configurations,
-			datasets_prefix,
-			max_num_datasets,
-			dataset_delimiter,
-			filename_suffix,
-			should_sum,
-			target,
-			pickle_filename,
-			should_reload,
-			should_preload):
+			configurations=None,
+			datasets_prefix=None,
+			max_num_datasets=None,
+			dataset_delimiter=None,
+			filename_suffix=None,
+			should_sum=None,
+			target=None,
+			pickle_filename=None,
+			should_reload=False,
+			should_preload=None,
+			require_pickle=False):
 
 		self.tasksets = [] # tasksets is of the format [benchmark_idx][trace_idx][task_idx][event_idx] == count
 		self.events = []
@@ -71,6 +72,16 @@ class ComperfDataset:
 		self.fastest_mean_benchmark = None
 
 		loaded = False
+		if should_reload == True and require_pickle == True:
+			logging.error("Loading a dataset that explicitly requires loading from pickle, but should_reload is enabled.")
+			raise ValueError()
+	
+		if require_pickle == True:
+			loaded = self.load_from_pickle(pickle_filename)
+			if loaded == False:
+				logging.error("Loading a dataset that explicitly requires loading from pickle, and the pickle file (%) was not able to be loaded", pickle_filename)
+				raise ValueError()
+
 		if not should_reload:
 			loaded = self.load_from_pickle(pickle_filename)
 
