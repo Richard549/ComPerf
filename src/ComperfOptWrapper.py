@@ -214,7 +214,7 @@ def find_best_hyperparams(
 						logging.debug("Killing %d", sub_child.pid)
 						sub_child.terminate()
 						sub_child.kill()
-					logging.debug("Killing %d", child.pid))
+					logging.debug("Killing %d", child.pid)
 					child.terminate()
 					child.kill()
 				p.terminate()
