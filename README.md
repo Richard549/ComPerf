@@ -2,11 +2,13 @@
 
 This repository contains code relevant to *ComPerf: Comparative Performance
 Analysis via Empirical Modelling* (publication forthcoming), which is related
-to our earlier work [R. Neill, A. Drebes and A. Pop, "Automated Analysis of
+to our earlier work:
+
+[R. Neill, A. Drebes and A. Pop, "Automated Analysis of
 Task-Parallel Execution Behavior Via Artificial Neural Networks," 2018 IEEE
 International Parallel and Distributed Processing Symposium Workshops (IPDPSW),
 Vancouver, BC, 2018, pp. 647-656, doi:
-10.1109/IPDPSW.2018.00105.](https://ieeexplore.ieee.org/document/8425472).
+10.1109/IPDPSW.2018.00105](https://ieeexplore.ieee.org/document/8425472).
 
 ComPerf implements a comparative technique for post-mortem parallel performance
 analysis, and aims to automate the identification of dominating features
@@ -14,7 +16,7 @@ between different parallel workloads, thereby characterizing their observed
 performance variations. To do this, predictive artificial neural networks are
 trained to (empirically) capture the complex interactions within profiling data
 from parallel executions. Recent advances in artificial neural network
-interpretability---namely, [DeepLIFT](https://arxiv.org/abs/1704.02685)---to
+interpretability (namely, [DeepLIFT](https://arxiv.org/abs/1704.02685)) to
 determine the variations in program and system features that effect the
 greatest impact on the observed performance variations.
 
@@ -49,13 +51,13 @@ as the user runs additional repeats and k-folds.
 
 The profiling data must be supplied as a delimited flat file, with rows that
 represent examples and a header that identifies each feature/column. Multiple
-configurations can be targetted, supplied in the `config.py` with the
+configurations can be targeted, supplied in the `config.py` via the
 `get_configurations()` function. These configurations (returned as strings)
-should identify the file prefix to use to load the correct flat file for each
+should help identify the filenames to load for each
 configuration. With each configuration executed multiple times to produce
 multiple datasets for each configuration, the filename's integer suffix must be
 used to identify the repeat. For the example `config.py`, the profiling dataset
-for the 5th repeat of the tile size configuration $(i,j,k) = (8,32,8)$ is:
+for the 5th repeat of the tile size configuration (i,j,k) = (8,32,8) is:
 
     /home/rneill/workspace/data/matmul_datasets/matmul_tiled_8_32_8_4.csv
 
