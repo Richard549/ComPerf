@@ -1,8 +1,8 @@
 class Config:
 	
-	datasets_prefix="/home/rneill/workspace/data/thesis_data/strassen_test_merges_temp/clustering/"
+	datasets_prefix="/home/rneill/workspace/data/matmul_datasets/matmul_tiled_"
 	datasets_suffix=None
-	filename_suffix="_merge.csv"
+	filename_suffix=".csv"
 
 	# these are only the events that we want to use as input to the model
 	input_events = [

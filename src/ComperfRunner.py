@@ -323,13 +323,6 @@ def run_comperf(
 			average_pred_duration_variation,
 			average_true_duration_variation)
 
-hyperparams = {}
-with open(hyperparameter_filename,'r') as f:
-	hyperparams = json.load(f)
-	if len(hyperparams) == 0:
-		log.fatal("Loaded hyperparamters " + str(hyperparameter_filename) + " are invalid")
-		exit(1)
-
 def log_level_option(input_string):
 	log_level_option_int = 0
 	try:
